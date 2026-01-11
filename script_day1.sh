@@ -1,104 +1,103 @@
 #!/bin/bash
 
 # ================================================== 
-#                INFO PENGETAHUAN
+#                INFO PENGETAHUAN (KB)
 # ================================================== 
-# Abuse Elevation Control Mechanism | T1548
-# T1548.001 | T1548.003
-# ================================================== 
-# Abuse Elevation Control Mechanism | T1053
-# T1053.003
-# ================================================== 
-# Boot or Logon Initialization Scripts | T1037
-# T1053.004
+# T1548.001 | SUID AND Known-Binary AND Executable
+# T1548.003 | Sudo-Listable AND NOPASSWD-Found
+# T1053.003 | Cron-Exists AND Writable-by-User
+# T1037.004 | RC-Local-Exists AND Writable-by-User
 # ================================================== 
 
-# Pengaturan Warna untuk output
+# Pengaturan Warna
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # Tanpa warna
+NOCOLOR='\033[0m'
 
-echo -e "${YELLOW}=== Privilege Escalation Diagnosis ===${NC}"
+echo -e "${YELLOW}=== Privilege Escalation Diagnosis (AND Logic) ===${NOCOLOR}"
 echo "-----------------------------------------------------"
 
-# --- 1. MEMORY (Penyimpanan Fakta) ---
-# Tergantung device, setelah di scan fakta ditemukan akan disimpan ke sini.
-FAKTA_SUID_BIN=""
-FAKTA_SUDO_NOPASSWD=""
-FAKTA_WRITABLE_CRON=""
-FAKTA_WRITABLE_RC=""
+# --- 1. WORKING MEMORY (Fakta-fakta) ---
+F1_SUID_PATH=""
+F1_CAN_EXECUTE=false
 
-# --- 2. Pengumpulan Fakta secara Otomatis ---
-echo -e "[*] Tahap 1: Pengumpulan Fakta "
+F2_SUDO_L=false
+F2_NOPASSWD=false
 
-# A. Cek SUID Binaries (T1548.001)
-# Test Exploit dari GTFoBin
-FAKTA_SUID_BIN=$(find /usr/bin /usr/sbin -perm -4000 -type f 2>/dev/null | grep -E "/(nmap|vim|perl|python|bash|find|more|less|nano|cp|mv)$")
+F3_CRON_EXISTS=false
+F3_CRON_WRITABLE=""
 
-# B. Cek Sudo NOPASSWD (T1548.003)
-# Hanya bisa dicek jika user saat ini punya akses sudo -l
-FAKTA_SUDO_NOPASSWD=$(sudo -l -n 2>/dev/null | grep "NOPASSWD")
+F4_RC_EXISTS=false
+F4_RC_WRITABLE=false
 
-# C. Cek Writable Cron Job (T1053.003)
-# Mencari file script di crontab yang bisa ditulis oleh user saat ini
-if [ -f /etc/crontab ]; then
+# --- 2. TAHAP PENGUMPULAN FAKTA ---
+echo -e "[*] Tahap 1: Pengumpulan Fakta Terperinci"
+
+# A. Fakta untuk T1548.001 (SUID)
+# Mencari apakah ada binary GTFOBins yang memiliki bit SUID
+F1_SUID_PATH=$(find /usr/bin /usr/sbin -perm -4000 -type f 2>/dev/null | grep -E "/(nmap|vim|perl|python|bash|find|more|less|nano|cp|mv)$" | head -n 1)
+if [ -x "$F1_SUID_PATH" ]; then F1_CAN_EXECUTE=true; fi
+
+# B. Fakta untuk T1548.003 (Sudo)
+if sudo -l -n &>/dev/null; then F2_SUDO_L=true; fi
+if sudo -l -n 2>/dev/null | grep -q "NOPASSWD"; then F2_NOPASSWD=true; fi
+
+# C. Fakta untuk T1053.003 (Cron)
+if [ -f /etc/crontab ]; then 
+    F3_CRON_EXISTS=true
+    # Cek apakah ada script yang dipanggil cron dan bisa ditulis user
     CRON_PATHS=$(grep -v "^#" /etc/crontab | awk '{print $6}' | grep "/")
     for path in $CRON_PATHS; do
-        if [ -w "$path" ]; then FAKTA_WRITABLE_CRON="$path"; break; fi
+        if [ -w "$path" ]; then F3_CRON_WRITABLE="$path"; break; fi
     done
 fi
 
-# D. Cek Writable RC Scripts (T1037.004)
-# Mencari rc.local atau init.d yang dapat dimodifikasi.
-if [ -w /etc/rc.local ]; then
-    FAKTA_WRITABLE_RC="/etc/rc.local"
-fi
+# D. Fakta untuk T1037.004 (RC Script)
+if [ -f /etc/rc.local ]; then F4_RC_EXISTS=true; fi
+if [ -w /etc/rc.local ]; then F4_RC_WRITABLE=true; fi
 
-echo -e "${GREEN}[V] Selesai Mengumpulkan Fakta.${NC}\n"
+echo -e "${GREEN}[V] Selesai Mengumpulkan Fakta.${NOCOLOR}\n"
 
-# --- 3. INFERENCE ENGINE ---
-# R = Rule
-# OUTPUT DARI R1,R2,R3,R4
-echo -e "[*] Tahap 2: Menjalankan Mesin Inferensi (Rule)..."
+# --- 3. INFERENCE ENGINE (Forward Chaining with AND Logic) ---
+echo -e "[*] Tahap 2: Menjalankan Mesin Inferensi (Composite Rules)..."
 
 DIAGNOSA_HASIL=()
 
-# RULE 1: IF (SUID_Binaries_Found) THEN (T1548.001)
-if [ ! -z "$FAKTA_SUID_BIN" ]; then
-    echo -e "  [>] Rule 1, Fakta SUID ditemukan pada: $FAKTA_SUID_BIN"
+# RULE 1: IF (Fakta SUID Ada) AND (User Bisa Eksekusi)
+if [ ! -z "$F1_SUID_PATH" ] && [ "$F1_CAN_EXECUTE" = true ]; then
+    echo -e "  [>] R1 Terpicu: Kombinasi SUID + Izin Eksekusi pada $F1_SUID_PATH"
     DIAGNOSA_HASIL+=("T1548.001: Abuse Elevation Control Mechanism (Setuid/Setgid)")
 fi
 
-# RULE 2: IF (Sudo_NoPasswd_Found) THEN (T1548.003)
-if [ ! -z "$FAKTA_SUDO_NOPASSWD" ]; then
-    echo -e "  [>] Rule 2, Fakta Sudo NOPASSWD ditemukan."
+# RULE 2: IF (Sudo Bisa di-List) AND (Ada String NOPASSWD)
+if [ "$F2_SUDO_L" = true ] && [ "$F2_NOPASSWD" = true ]; then
+    echo -e "  [>] R2 Terpicu: Kombinasi Akses Sudo + NOPASSWD ditemukan."
     DIAGNOSA_HASIL+=("T1548.003: Abuse Elevation Control Mechanism (Sudo/Sudo Caching)")
 fi
 
-# RULE 3: IF (Writable_Cron_Script_Found) THEN (T1053.003)
-if [ ! -z "$FAKTA_WRITABLE_CRON" ]; then
-    echo -e "  [>] Rule 3, Fakta Script Cron Writable ditemukan di: $FAKTA_WRITABLE_CRON"
+# RULE 3: IF (Cron File Ada) AND (Ada Script yang Writable)
+if [ "$F3_CRON_EXISTS" = true ] && [ ! -z "$F3_CRON_WRITABLE" ]; then
+    echo -e "  [>] R3 Terpicu: Kombinasi File Cron + Script Writable ($F3_CRON_WRITABLE)"
     DIAGNOSA_HASIL+=("T1053.003: Scheduled Task/Job (Cron)")
 fi
 
-# RULE 4: IF (Writable_RC_Script_Found) THEN (T1037.004)
-if [ ! -z "$FAKTA_WRITABLE_RC" ]; then
-    echo -e "  [>] Rule 4, Fakta RC Script Writable ditemukan di: $FAKTA_WRITABLE_RC"
+# RULE 4: IF (RC Script Ada) AND (File Writable oleh User)
+if [ "$F4_RC_EXISTS" = true ] && [ "$F4_RC_WRITABLE" = true ]; then
+    echo -e "  [>] R4 Terpicu: Kombinasi rc.local Ada + Izin Tulis (Writable)."
     DIAGNOSA_HASIL+=("T1037.004: Boot and Logon RC Script")
 fi
 
 # --- 4. OUTPUT / KESIMPULAN (Goal) ---
 echo -e "\n-----------------------------------------------------"
-echo -e "${YELLOW}=== HASIL DIAGNOSA AKHIR ===${NC}"
+echo -e "${YELLOW}=== HASIL DIAGNOSA AKHIR ===${NOCOLOR}"
 
 if [ ${#DIAGNOSA_HASIL[@]} -eq 0 ]; then
-    echo -e "${GREEN}Sistem Aman. Tidak ditemukan miskonfigurasi berdasarkan batasan masalah.${NC}"
+    echo -e "${GREEN}Sistem Aman. Tidak ada aturan (Rules) yang terpenuhi secara utuh.${NOCOLOR}"
 else
-    echo -e "${RED}DITEMUKAN CELAH PRIVILEGE ESCALATION:${NC}"
+    echo -e "${RED}DITEMUKAN CELAH PRIVILEGE ESCALATION:${NOCOLOR}"
     for hasil in "${DIAGNOSA_HASIL[@]}"; do
         echo -e "  - $hasil"
     done
-    echo -e "\n${YELLOW}Rekomendasi:${NC} Periksa izin file (chmod) dan batasi akses sudoers."
 fi
 echo "-----------------------------------------------------"
