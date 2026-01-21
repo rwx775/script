@@ -44,12 +44,18 @@ if sudo -l -n &>/dev/null; then F2_SUDO_L=true; fi
 if sudo -l -n 2>/dev/null | grep -q "NOPASSWD"; then F2_NOPASSWD=true; fi
 
 # C. Fakta untuk T1053.003 (Cron)
+# C. Fakta untuk T1053.003 (Cron)
 if [ -f /etc/crontab ]; then 
     F3_CRON_EXISTS=true
-    # Cek apakah ada script yang dipanggil cron dan bisa ditulis user
-    CRON_PATHS=$(grep -v "^#" /etc/crontab | awk '{print $6}' | grep "/")
+    # PERBAIKAN: Mengambil kolom ke-7 (Path Script/Command)
+    CRON_PATHS=$(grep -v "^#" /etc/crontab | awk '{print $7}' | grep "/")
+    
     for path in $CRON_PATHS; do
-        if [ -w "$path" ]; then F3_CRON_WRITABLE="$path"; break; fi
+        # Cek apakah file tersebut ada DAN bisa ditulis (writable) oleh user saat ini
+        if [ -f "$path" ] && [ -w "$path" ]; then 
+            F3_CRON_WRITABLE="$path"
+            break
+        fi
     done
 fi
 
