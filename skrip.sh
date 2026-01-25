@@ -54,25 +54,39 @@ if [ ! -z "$SUDO_CHECK" ]; then
     echo -e "  [Fakta F03] Ditemukan entri NOPASSWD: $SUDO_CHECK"
 fi
 
-# C. Identifikasi F04 (Cron Writable)
+# C. Identifikasi F04 (Cron Vulnerability Check: Non-Root Owner OR World Writable)
 if [ -f /etc/crontab ]; then
+    # Mencari path script yang dipanggil di crontab (kolom ke-7)
     CRON_PATHS=$(grep -v "^#" /etc/crontab | awk '{print $7}' | grep "/")
+    
     for p in $CRON_PATHS; do
-        if [ -f "$p" ] && [ -w "$p" ]; then
-            F04_CRON_WRITABLE=true
-            PATH_CRON="$p"
-            echo -e "  [Fakta F04] Skrip Cron Writable: $p"
-            break
+        if [ -f "$p" ]; then
+            # Cek Pemilik File
+            FILE_OWNER=$(stat -c '%U' "$p")
+            
+            # Cek Izin World Writable
+            IS_WORLD_WRITABLE=$(stat -c "%a" "$p" | grep -E ".(2|3|6|7)$")
+
+            # (Owner != root) ATAU World Writable
+            if [ "$FILE_OWNER" != "root" ] || [ ! -z "$IS_WORLD_WRITABLE" ]; then
+                F04_CRON_WRITABLE=true
+                PATH_CRON="$p"
+                echo -e "  [Fakta F04] Bahaya Cron: $p (Owner: $FILE_OWNER, Izin: $(stat -c "%a" "$p"))"
+                break
+            fi
         fi
     done
 fi
 
 # D. Identifikasi F05 (RC Local Writable)
-if [ -f /etc/rc.local ] && [ -w /etc/rc.local ]; then
-    F05_RC_WRITABLE=true
-    echo -e "  [Fakta F05] Berkas /etc/rc.local dapat dimodifikasi"
+if [ -f /etc/rc.local ]; then
+    # Mengambil digit terakhir dari izin (misal 777 -> ambil 7 terakhir)
+    PERM=$(stat -c "%a" /etc/rc.local)
+    if [ "$PERM" == "777" ]; then
+        F05_RC_WRITABLE=true
+        echo -e "  [Fakta F05] Bahaya: Berkas /etc/rc.local bersifat world-writable ($PERM)"
+    fi
 fi
-
 echo -e "${GREEN}[V] Selesai Mengumpulkan Fakta.${NC}\n"
 
 # --- 3. INFERENCE ENGINE ---
