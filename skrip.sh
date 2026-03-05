@@ -48,7 +48,7 @@ if [ ! -z "$ALL_SUID" ]; then
 fi
 
 # B. Identifikasi F03 (Sudo NOPASSWD)
-SUDO_CHECK=$(grep -r "NOPASSWD" /etc/sudoers /etc/sudoers.d/ 2>/dev/null)
+SUDO_CHECK=$(grep -r "^[[:space:]]*[^#].*NOPASSWD" test /etc/sudoers /etc/sudoers.d/ 2>/dev/null)
 if [ ! -z "$SUDO_CHECK" ]; then
     F03_SUDO_NOPASSWD=true
     echo -e "  [Fakta F03] Ditemukan entri NOPASSWD: $SUDO_CHECK"
@@ -57,6 +57,7 @@ fi
 # C. Identifikasi F04 (Cron Vulnerability Check: Non-Root Owner OR World Writable)
 if [ -f /etc/crontab ]; then
     # Mencari path script yang dipanggil di crontab (kolom ke-7)
+    # pakai ini bisa grep -v "^#" /etc/crontab | grep -o "/[a-zA-Z0-9./_-]\+"
     CRON_PATHS=$(grep -v "^#" /etc/crontab | awk '{print $7}' | grep "/")
     
     for p in $CRON_PATHS; do
